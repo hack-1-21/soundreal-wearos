@@ -18,8 +18,10 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.core.content.ContextCompat
@@ -117,7 +119,9 @@ fun WearApp(
     var deviceToken by remember { mutableStateOf<String?>(null) }
     var linkStatus by remember { mutableStateOf("Checking link") }
     var linkRetryNonce by remember { mutableStateOf(0) }
+    var isRequestingCode by remember { mutableStateOf(false) }
     val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(linkRetryNonce) {
         val prefs = context.getSharedPreferences(DEVICE_PREFS_NAME, Context.MODE_PRIVATE)
@@ -143,18 +147,7 @@ fun WearApp(
             linkStatus = "Link removed"
         }
 
-        linkStatus = "Starting link"
-        when (val result = startDeviceLink()) {
-            is StartLinkResult.Success -> {
-                deviceId = result.deviceId
-                pairingCode = result.pairingCode
-                prefs.edit().putString(DEVICE_ID_KEY, result.deviceId).apply()
-                linkStatus = "Enter code"
-            }
-            is StartLinkResult.Failure -> {
-                linkStatus = result.message
-            }
-        }
+        linkStatus = "Not linked"
     }
 
     LaunchedEffect(deviceId, deviceToken) {
@@ -170,7 +163,6 @@ fun WearApp(
                     pairingCode = null
                     prefs.edit().remove(DEVICE_ID_KEY).apply()
                     deviceId = null
-                    linkRetryNonce++
                     return@LaunchedEffect
                 }
                 is PollLinkResult.Linked -> {
@@ -294,6 +286,36 @@ fun WearApp(
         }
     }
 
+    fun requestPairingCode() {
+        if (isRequestingCode) return
+
+        scope.launch {
+            val prefs = context.getSharedPreferences(DEVICE_PREFS_NAME, Context.MODE_PRIVATE)
+            isRequestingCode = true
+            linkStatus = "Getting code"
+            pairingCode = null
+            deviceId = null
+            deviceToken = null
+            prefs.edit()
+                .remove(DEVICE_ID_KEY)
+                .remove(DEVICE_TOKEN_KEY)
+                .apply()
+
+            when (val result = startDeviceLink()) {
+                is StartLinkResult.Success -> {
+                    deviceId = result.deviceId
+                    pairingCode = result.pairingCode
+                    prefs.edit().putString(DEVICE_ID_KEY, result.deviceId).apply()
+                    linkStatus = "Enter code"
+                }
+                is StartLinkResult.Failure -> {
+                    linkStatus = result.message
+                }
+            }
+            isRequestingCode = false
+        }
+    }
+
     Hack121smartwatchTheme {
         Box(
             modifier = Modifier
@@ -303,141 +325,248 @@ fun WearApp(
         ) {
             TimeText()
 
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier
-                    .padding(horizontal = 8.dp)
-                    .verticalScroll(rememberScrollState())
-            ) {
-                Text("SoundReal")
-
-                Spacer(modifier = Modifier.height(4.dp))
-
-                Text(
-                    text = "Link: $linkStatus",
-                    textAlign = TextAlign.Center
+            if (deviceToken == null) {
+                SetupContent(
+                    linkStatus = linkStatus,
+                    pairingCode = pairingCode,
+                    isRequestingCode = isRequestingCode,
+                    onRequestPairingCode = { requestPairingCode() }
                 )
+            } else {
+                MeasurementContent(
+                    currentDb = currentDb,
+                    peakDb = peakDb,
+                    currentHz = currentHz,
+                    sendStatus = sendStatus,
+                    locationStatus = locationStatus,
+                    audioStatus = audioStatus,
+                    sendCount = sendCount,
+                    hasAudioPermission = hasAudioPermission,
+                    hasLocationPermission = hasLocationPermission,
+                    onRequestPermission = onRequestPermission,
+                    onRequestLocationPermission = onRequestLocationPermission,
+                    onSend = {
+                        scope.launch {
+                            val currentLatitude = latitude
+                            val currentLongitude = longitude
+                            val currentDeviceToken = deviceToken
 
-                pairingCode?.let { code ->
-                    Text(
-                        text = code,
-                        textAlign = TextAlign.Center
-                    )
-                }
+                            if (currentLatitude == null || currentLongitude == null) {
+                                sendStatus = "Waiting for GPS"
+                                return@launch
+                            }
+                            if (currentDeviceToken == null) {
+                                sendStatus = "Link required"
+                                return@launch
+                            }
 
-                Spacer(modifier = Modifier.height(4.dp))
-
-                Text(
-                    text = if (hasAudioPermission) "Mic: OK" else "Mic: NG",
-                    textAlign = TextAlign.Center
-                )
-
-                Text(
-                    text = "Audio: $audioStatus",
-                    textAlign = TextAlign.Center
-                )
-
-                Spacer(modifier = Modifier.height(4.dp))
-
-                Text(
-                    text = "Current dB: %.1f".format(currentDb),
-                    textAlign = TextAlign.Center
-                )
-
-                Text(
-                    text = "Peak dB: %.1f".format(peakDb),
-                    textAlign = TextAlign.Center
-                )
-
-                Text(
-                    text = "Hz: %.1f".format(currentHz),
-                    textAlign = TextAlign.Center
-                )
-
-                Spacer(modifier = Modifier.height(4.dp))
-
-                Text(
-                    text = sendStatus,
-                    textAlign = TextAlign.Center
-                )
-
-                Text(
-                    text = "Loc: $locationStatus",
-                    textAlign = TextAlign.Center
-                )
-
-                Text(
-                    text = "Sent: $sendCount",
-                    textAlign = TextAlign.Center
-                )
-
-                Text(
-                    text = latitude?.let { "Lat: %.5f".format(it) } ?: "Lat: locating...",
-                    textAlign = TextAlign.Center
-                )
-
-                Text(
-                    text = longitude?.let { "Lng: %.5f".format(it) } ?: "Lng: locating...",
-                    textAlign = TextAlign.Center
-                )
-
-                Spacer(modifier = Modifier.height(4.dp))
-
-                if (!hasAudioPermission) {
-                    Button(onClick = onRequestPermission) {
-                        Text("Allow Mic")
-                    }
-                }
-                if (!hasLocationPermission) {
-                    Button(onClick = onRequestLocationPermission) {
-                        Text("Allow GPS")
-                    }
-                }
-                if (hasAudioPermission && hasLocationPermission) {
-                    Button(
-                        onClick = {
-                            CoroutineScope(Dispatchers.Main).launch {
-                                val currentLatitude = latitude
-                                val currentLongitude = longitude
-                                val currentDeviceToken = deviceToken
-
-                                if (currentLatitude == null || currentLongitude == null) {
-                                    sendStatus = "Send paused"
-                                    return@launch
-                                }
-                                if (currentDeviceToken == null) {
-                                    sendStatus = "Link required"
-                                    return@launch
-                                }
-
-                                sendStatus = "Sending..."
-                                sendStatus = sendMeasurement(
-                                    currentDb,
-                                    currentHz,
-                                    currentLatitude,
-                                    currentLongitude,
-                                    currentDeviceToken
-                                )
-                                if (sendStatus == "Response: 401") {
-                                    context.getSharedPreferences(DEVICE_PREFS_NAME, Context.MODE_PRIVATE)
-                                        .edit()
-                                        .remove(DEVICE_TOKEN_KEY)
-                                        .remove(DEVICE_ID_KEY)
-                                        .apply()
-                                    deviceToken = null
-                                    deviceId = null
-                                    pairingCode = null
-                                    linkStatus = "Link removed"
-                                    linkRetryNonce++
-                                }
+                            sendStatus = "Sending"
+                            sendStatus = sendMeasurement(
+                                currentDb,
+                                currentHz,
+                                currentLatitude,
+                                currentLongitude,
+                                currentDeviceToken
+                            )
+                            if (sendStatus == "Response: 401") {
+                                context.getSharedPreferences(DEVICE_PREFS_NAME, Context.MODE_PRIVATE)
+                                    .edit()
+                                    .remove(DEVICE_TOKEN_KEY)
+                                    .remove(DEVICE_ID_KEY)
+                                    .apply()
+                                deviceToken = null
+                                deviceId = null
+                                pairingCode = null
+                                linkStatus = "Link removed"
+                                linkRetryNonce++
                             }
                         }
-                    ) {
-                        Text("Send")
                     }
-                }
+                )
             }
         }
+    }
+}
+
+@Composable
+fun SetupContent(
+    linkStatus: String,
+    pairingCode: String?,
+    isRequestingCode: Boolean,
+    onRequestPairingCode: () -> Unit
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 14.dp)
+            .padding(top = 22.dp, bottom = 8.dp)
+            .verticalScroll(rememberScrollState())
+    ) {
+        Text(
+            text = "SoundReal",
+            fontSize = 17.sp,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        if (pairingCode == null) {
+            Text(
+                text = "Connect your watch",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                textAlign = TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(5.dp))
+            Text(
+                text = "Get a code, then enter it in the mobile app.",
+                fontSize = 10.sp,
+                textAlign = TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+            Chip(
+                onClick = onRequestPairingCode,
+                enabled = !isRequestingCode,
+                label = {
+                    Text(
+                        text = if (isRequestingCode) "Getting..." else "Get Code",
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(38.dp)
+            )
+        } else {
+            Text(
+                text = pairingCode,
+                fontSize = 25.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(5.dp))
+            Text(
+                text = "Enter this code in the mobile app.",
+                fontSize = 10.sp,
+                textAlign = TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(7.dp))
+            Text(
+                text = if (linkStatus == "Waiting for link") "Waiting..." else linkStatus,
+                fontSize = 10.sp,
+                textAlign = TextAlign.Center
+            )
+        }
+
+        if (pairingCode == null && linkStatus != "Not linked") {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = linkStatus,
+                fontSize = 10.sp,
+                textAlign = TextAlign.Center
+            )
+        }
+    }
+}
+
+@Composable
+fun MeasurementContent(
+    currentDb: Double,
+    peakDb: Double,
+    currentHz: Double,
+    sendStatus: String,
+    locationStatus: String,
+    audioStatus: String,
+    sendCount: Int,
+    hasAudioPermission: Boolean,
+    hasLocationPermission: Boolean,
+    onRequestPermission: () -> Unit,
+    onRequestLocationPermission: () -> Unit,
+    onSend: () -> Unit
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp)
+            .padding(top = 22.dp, bottom = 8.dp)
+            .verticalScroll(rememberScrollState())
+    ) {
+        Text(
+            text = "SoundReal",
+            fontSize = 15.sp,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center
+        )
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        Text(
+            text = "%.1f dB".format(currentDb),
+            fontSize = 30.sp,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center
+        )
+
+        Text(
+            text = "%.1f Hz".format(currentHz),
+            fontSize = 13.sp,
+            textAlign = TextAlign.Center
+        )
+
+        Spacer(modifier = Modifier.height(5.dp))
+
+        Text(
+            text = "Peak %.1f dB".format(peakDb),
+            fontSize = 10.sp,
+            textAlign = TextAlign.Center
+        )
+        Text(
+            text = compactStatus(locationStatus, audioStatus, sendStatus),
+            fontSize = 10.sp,
+            textAlign = TextAlign.Center
+        )
+        Text(
+            text = "Sent $sendCount",
+            fontSize = 10.sp,
+            textAlign = TextAlign.Center
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        if (!hasAudioPermission) {
+            Button(onClick = onRequestPermission) {
+                Text("Mic")
+            }
+        }
+        if (!hasLocationPermission) {
+            Button(onClick = onRequestLocationPermission) {
+                Text("GPS")
+            }
+        }
+        if (hasAudioPermission && hasLocationPermission) {
+            Button(onClick = onSend) {
+                Text("Send")
+            }
+        }
+    }
+}
+
+fun compactStatus(
+    locationStatus: String,
+    audioStatus: String,
+    sendStatus: String
+): String {
+    return when {
+        locationStatus.contains("No GPS", ignoreCase = true) -> "GPS waiting"
+        audioStatus.contains("sampling", ignoreCase = true) -> "Listening"
+        sendStatus.contains("Sending", ignoreCase = true) -> "Sending"
+        sendStatus.startsWith("Response: 2") -> "Synced"
+        sendStatus.startsWith("Error") -> "Network error"
+        else -> locationStatus
     }
 }
 
