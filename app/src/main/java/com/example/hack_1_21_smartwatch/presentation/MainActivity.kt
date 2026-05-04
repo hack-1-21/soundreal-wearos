@@ -36,6 +36,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
 import kotlin.coroutines.resume
 import kotlin.math.log10
 import kotlin.math.sqrt
@@ -44,6 +45,9 @@ private const val LOCATION_POLL_INTERVAL_MS = 20_000L
 private const val STATIONARY_AUDIO_INTERVAL_MS = 5 * 60 * 1000L
 private const val MOVEMENT_THRESHOLD_METERS = 5f
 private const val AUDIO_SAMPLE_DURATION_MS = 2_000L
+private const val DEVICE_PREFS_NAME = "device_auth"
+private const val DEVICE_ID_KEY = "device_id"
+private const val DEVICE_TOKEN_KEY = "device_token"
 
 class MainActivity : ComponentActivity() {
 
@@ -108,9 +112,72 @@ fun WearApp(
     var sendCount by remember { mutableStateOf(0) }
     var latitude by remember { mutableStateOf<Double?>(null) }
     var longitude by remember { mutableStateOf<Double?>(null) }
+    var deviceId by remember { mutableStateOf<String?>(null) }
+    var pairingCode by remember { mutableStateOf<String?>(null) }
+    var deviceToken by remember { mutableStateOf<String?>(null) }
+    var linkStatus by remember { mutableStateOf("Checking link") }
     val context = androidx.compose.ui.platform.LocalContext.current
 
-    LaunchedEffect(hasAudioPermission, hasLocationPermission) {
+    LaunchedEffect(Unit) {
+        val prefs = context.getSharedPreferences(DEVICE_PREFS_NAME, Context.MODE_PRIVATE)
+        deviceToken = prefs.getString(DEVICE_TOKEN_KEY, null)
+        deviceId = prefs.getString(DEVICE_ID_KEY, null)
+
+        if (deviceToken != null) {
+            linkStatus = "Linked"
+            return@LaunchedEffect
+        }
+
+        linkStatus = "Starting link"
+        when (val result = startDeviceLink()) {
+            is StartLinkResult.Success -> {
+                deviceId = result.deviceId
+                pairingCode = result.pairingCode
+                prefs.edit().putString(DEVICE_ID_KEY, result.deviceId).apply()
+                linkStatus = "Enter code"
+            }
+            is StartLinkResult.Failure -> {
+                linkStatus = result.message
+            }
+        }
+    }
+
+    LaunchedEffect(deviceId, deviceToken) {
+        val currentDeviceId = deviceId ?: return@LaunchedEffect
+        if (deviceToken != null) return@LaunchedEffect
+
+        val prefs = context.getSharedPreferences(DEVICE_PREFS_NAME, Context.MODE_PRIVATE)
+        while (deviceToken == null) {
+            when (val result = pollDeviceLink(currentDeviceId)) {
+                is PollLinkResult.Pending -> linkStatus = "Waiting for link"
+                is PollLinkResult.Expired -> {
+                    linkStatus = "Code expired"
+                    pairingCode = null
+                    prefs.edit().remove(DEVICE_ID_KEY).apply()
+                    return@LaunchedEffect
+                }
+                is PollLinkResult.Linked -> {
+                    deviceToken = result.deviceToken
+                    pairingCode = null
+                    linkStatus = "Linked"
+                    prefs.edit()
+                        .putString(DEVICE_TOKEN_KEY, result.deviceToken)
+                        .putString(DEVICE_ID_KEY, currentDeviceId)
+                        .apply()
+                    return@LaunchedEffect
+                }
+                is PollLinkResult.Failure -> linkStatus = result.message
+            }
+            delay(3_000L)
+        }
+    }
+
+    LaunchedEffect(hasAudioPermission, hasLocationPermission, deviceToken) {
+        val currentDeviceToken = deviceToken
+        if (currentDeviceToken == null) {
+            sendStatus = "Link required"
+            return@LaunchedEffect
+        }
         if (!hasAudioPermission) {
             audioStatus = "Mic permission needed"
             return@LaunchedEffect
@@ -179,7 +246,13 @@ fun WearApp(
             lastAudioTimeMillis = now
 
             sendStatus = "Auto sending..."
-            val result = sendMeasurement(currentDb, currentHz, location.latitude, location.longitude)
+            val result = sendMeasurement(
+                currentDb,
+                currentHz,
+                location.latitude,
+                location.longitude,
+                currentDeviceToken
+            )
             sendStatus = result
 
             if (result.startsWith("Response")) {
@@ -206,6 +279,20 @@ fun WearApp(
                     .verticalScroll(rememberScrollState())
             ) {
                 Text("SoundReal")
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                Text(
+                    text = "Link: $linkStatus",
+                    textAlign = TextAlign.Center
+                )
+
+                pairingCode?.let { code ->
+                    Text(
+                        text = code,
+                        textAlign = TextAlign.Center
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(4.dp))
 
@@ -281,9 +368,14 @@ fun WearApp(
                             CoroutineScope(Dispatchers.Main).launch {
                                 val currentLatitude = latitude
                                 val currentLongitude = longitude
+                                val currentDeviceToken = deviceToken
 
                                 if (currentLatitude == null || currentLongitude == null) {
                                     sendStatus = "Send paused"
+                                    return@launch
+                                }
+                                if (currentDeviceToken == null) {
+                                    sendStatus = "Link required"
                                     return@launch
                                 }
 
@@ -292,7 +384,8 @@ fun WearApp(
                                     currentDb,
                                     currentHz,
                                     currentLatitude,
-                                    currentLongitude
+                                    currentLongitude,
+                                    currentDeviceToken
                                 )
                             }
                         }
@@ -309,13 +402,13 @@ suspend fun sendMeasurement(
     db: Double,
     hz: Double,
     latitude: Double,
-    longitude: Double
+    longitude: Double,
+    deviceToken: String
 ): String {
     val client = OkHttpClient()
 
     val json = """
         {
-            "user_id": "user-001",
             "db": $db,
             "hz": $hz,
             "latitude": $latitude,
@@ -327,6 +420,7 @@ suspend fun sendMeasurement(
 
     val request = Request.Builder()
         .url("${BuildConfig.API_BASE_URL}/measurements")
+        .header("Authorization", "Bearer $deviceToken")
         .post(body)
         .build()
 
@@ -337,6 +431,79 @@ suspend fun sendMeasurement(
             }
         } catch (e: Exception) {
             "Error: ${e.message}"
+        }
+    }
+}
+
+sealed class StartLinkResult {
+    data class Success(val deviceId: String, val pairingCode: String) : StartLinkResult()
+    data class Failure(val message: String) : StartLinkResult()
+}
+
+sealed class PollLinkResult {
+    data object Pending : PollLinkResult()
+    data object Expired : PollLinkResult()
+    data class Linked(val deviceToken: String) : PollLinkResult()
+    data class Failure(val message: String) : PollLinkResult()
+}
+
+suspend fun startDeviceLink(): StartLinkResult {
+    val client = OkHttpClient()
+    val body = "{}".toRequestBody("application/json".toMediaType())
+    val request = Request.Builder()
+        .url("${BuildConfig.API_BASE_URL}/device/start-link")
+        .post(body)
+        .build()
+
+    return withContext(Dispatchers.IO) {
+        try {
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    return@withContext StartLinkResult.Failure("Link start ${response.code}")
+                }
+
+                val json = JSONObject(response.body?.string().orEmpty())
+                StartLinkResult.Success(
+                    deviceId = json.getString("device_id"),
+                    pairingCode = json.getString("pairing_code")
+                )
+            }
+        } catch (e: Exception) {
+            StartLinkResult.Failure("Link error: ${e.message}")
+        }
+    }
+}
+
+suspend fun pollDeviceLink(deviceId: String): PollLinkResult {
+    val client = OkHttpClient()
+    val json = """
+        {
+            "device_id": "$deviceId"
+        }
+    """.trimIndent()
+    val body = json.toRequestBody("application/json".toMediaType())
+    val request = Request.Builder()
+        .url("${BuildConfig.API_BASE_URL}/device/poll-link")
+        .post(body)
+        .build()
+
+    return withContext(Dispatchers.IO) {
+        try {
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    return@withContext PollLinkResult.Failure("Poll ${response.code}")
+                }
+
+                val payload = JSONObject(response.body?.string().orEmpty())
+                when (payload.getString("status")) {
+                    "pending" -> PollLinkResult.Pending
+                    "expired" -> PollLinkResult.Expired
+                    "linked" -> PollLinkResult.Linked(payload.getString("device_token"))
+                    else -> PollLinkResult.Failure("Unknown link status")
+                }
+            }
+        } catch (e: Exception) {
+            PollLinkResult.Failure("Poll error: ${e.message}")
         }
     }
 }
