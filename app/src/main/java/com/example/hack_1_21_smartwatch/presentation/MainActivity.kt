@@ -116,16 +116,31 @@ fun WearApp(
     var pairingCode by remember { mutableStateOf<String?>(null) }
     var deviceToken by remember { mutableStateOf<String?>(null) }
     var linkStatus by remember { mutableStateOf("Checking link") }
+    var linkRetryNonce by remember { mutableStateOf(0) }
     val context = androidx.compose.ui.platform.LocalContext.current
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(linkRetryNonce) {
         val prefs = context.getSharedPreferences(DEVICE_PREFS_NAME, Context.MODE_PRIVATE)
-        deviceToken = prefs.getString(DEVICE_TOKEN_KEY, null)
-        deviceId = prefs.getString(DEVICE_ID_KEY, null)
+        val savedDeviceToken = prefs.getString(DEVICE_TOKEN_KEY, null)
+        val savedDeviceId = prefs.getString(DEVICE_ID_KEY, null)
 
-        if (deviceToken != null) {
-            linkStatus = "Linked"
-            return@LaunchedEffect
+        if (savedDeviceToken != null) {
+            linkStatus = "Checking link"
+            if (validateDeviceToken(savedDeviceToken)) {
+                deviceToken = savedDeviceToken
+                deviceId = savedDeviceId
+                linkStatus = "Linked"
+                return@LaunchedEffect
+            }
+
+            prefs.edit()
+                .remove(DEVICE_TOKEN_KEY)
+                .remove(DEVICE_ID_KEY)
+                .apply()
+            deviceToken = null
+            deviceId = null
+            pairingCode = null
+            linkStatus = "Link removed"
         }
 
         linkStatus = "Starting link"
@@ -154,6 +169,8 @@ fun WearApp(
                     linkStatus = "Code expired"
                     pairingCode = null
                     prefs.edit().remove(DEVICE_ID_KEY).apply()
+                    deviceId = null
+                    linkRetryNonce++
                     return@LaunchedEffect
                 }
                 is PollLinkResult.Linked -> {
@@ -254,6 +271,20 @@ fun WearApp(
                 currentDeviceToken
             )
             sendStatus = result
+
+            if (result == "Response: 401") {
+                context.getSharedPreferences(DEVICE_PREFS_NAME, Context.MODE_PRIVATE)
+                    .edit()
+                    .remove(DEVICE_TOKEN_KEY)
+                    .remove(DEVICE_ID_KEY)
+                    .apply()
+                deviceToken = null
+                deviceId = null
+                pairingCode = null
+                linkStatus = "Link removed"
+                linkRetryNonce++
+                return@LaunchedEffect
+            }
 
             if (result.startsWith("Response")) {
                 sendCount++
@@ -387,6 +418,18 @@ fun WearApp(
                                     currentLongitude,
                                     currentDeviceToken
                                 )
+                                if (sendStatus == "Response: 401") {
+                                    context.getSharedPreferences(DEVICE_PREFS_NAME, Context.MODE_PRIVATE)
+                                        .edit()
+                                        .remove(DEVICE_TOKEN_KEY)
+                                        .remove(DEVICE_ID_KEY)
+                                        .apply()
+                                    deviceToken = null
+                                    deviceId = null
+                                    pairingCode = null
+                                    linkStatus = "Link removed"
+                                    linkRetryNonce++
+                                }
                             }
                         }
                     ) {
@@ -431,6 +474,25 @@ suspend fun sendMeasurement(
             }
         } catch (e: Exception) {
             "Error: ${e.message}"
+        }
+    }
+}
+
+suspend fun validateDeviceToken(deviceToken: String): Boolean {
+    val client = OkHttpClient()
+    val request = Request.Builder()
+        .url("${BuildConfig.API_BASE_URL}/device/me")
+        .header("Authorization", "Bearer $deviceToken")
+        .get()
+        .build()
+
+    return withContext(Dispatchers.IO) {
+        try {
+            client.newCall(request).execute().use { response ->
+                response.isSuccessful
+            }
+        } catch (e: Exception) {
+            false
         }
     }
 }
