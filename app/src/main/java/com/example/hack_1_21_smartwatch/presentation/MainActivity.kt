@@ -10,6 +10,7 @@ import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.os.Bundle
 import android.location.Location
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -50,7 +51,7 @@ import kotlin.math.log10
 import kotlin.math.sqrt
 
 private const val LOCATION_POLL_INTERVAL_MS = 20_000L
-private const val STATIONARY_AUDIO_INTERVAL_MS = 5 * 60 * 1000L
+private const val STATIONARY_AUDIO_INTERVAL_MS = 60 * 1000L
 private const val MOVEMENT_THRESHOLD_METERS = 5f
 private const val AUDIO_SAMPLE_DURATION_MS = 2_000L
 private const val DEVICE_PREFS_NAME = "device_auth"
@@ -91,6 +92,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         setTheme(android.R.style.Theme_DeviceDefault)
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         hasAudioPermission = ContextCompat.checkSelfPermission(
             this,
@@ -243,7 +245,7 @@ fun WearApp(
                     STATIONARY_AUDIO_INTERVAL_MS - (now - lastAudioTimeMillis)
                     ).coerceAtLeast(0L) / 1000L
                 val distanceText = movedMeters?.let { "%.0fm".format(it) } ?: "--"
-                audioStatus = "Mic skipped ${remainingSeconds}s"
+                audioStatus = "Next ${remainingSeconds}s"
                 sendStatus = "Stationary $distanceText"
                 delay(LOCATION_POLL_INTERVAL_MS)
                 continue
@@ -619,6 +621,7 @@ fun compactStatus(
 ): String {
     return when {
         locationStatus.contains("No GPS", ignoreCase = true) -> "GPS waiting"
+        audioStatus.startsWith("Next", ignoreCase = true) -> audioStatus
         audioStatus.contains("sampling", ignoreCase = true) -> "Listening"
         sendStatus.contains("Sending", ignoreCase = true) -> "Syncing"
         sendStatus.startsWith("Error") -> "Network error"
