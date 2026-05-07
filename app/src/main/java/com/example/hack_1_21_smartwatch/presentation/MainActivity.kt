@@ -14,16 +14,19 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.core.content.ContextCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.wear.compose.material.*
@@ -50,6 +53,14 @@ private const val AUDIO_SAMPLE_DURATION_MS = 2_000L
 private const val DEVICE_PREFS_NAME = "device_auth"
 private const val DEVICE_ID_KEY = "device_id"
 private const val DEVICE_TOKEN_KEY = "device_token"
+
+private val SoundRealBackground = Color(0xFF0A1428)
+private val SoundRealPanel = Color(0xFF0D1525)
+private val SoundRealPrimary = Color(0xFF64C8FF)
+private val SoundRealGold = Color(0xFFFFD060)
+private val SoundRealText = Color(0xFFE8F4FF)
+private val SoundRealMuted = Color(0x99E8F4FF)
+private val SoundRealStroke = Color(0x4064C8FF)
 
 class MainActivity : ComponentActivity() {
 
@@ -106,14 +117,10 @@ fun WearApp(
     onRequestLocationPermission: () -> Unit
 ) {
     var currentDb by remember { mutableStateOf(0.0) }
-    var peakDb by remember { mutableStateOf(0.0) }
     var currentHz by remember { mutableStateOf(0.0) }
     var sendStatus by remember { mutableStateOf("Not sent") }
     var locationStatus by remember { mutableStateOf("GPS not started") }
     var audioStatus by remember { mutableStateOf("Mic not started") }
-    var sendCount by remember { mutableStateOf(0) }
-    var latitude by remember { mutableStateOf<Double?>(null) }
-    var longitude by remember { mutableStateOf<Double?>(null) }
     var deviceId by remember { mutableStateOf<String?>(null) }
     var pairingCode by remember { mutableStateOf<String?>(null) }
     var deviceToken by remember { mutableStateOf<String?>(null) }
@@ -212,8 +219,6 @@ fun WearApp(
                 continue
             }
 
-            latitude = location.latitude
-            longitude = location.longitude
             locationStatus = "GPS acquired"
 
             val now = System.currentTimeMillis()
@@ -248,9 +253,6 @@ fun WearApp(
 
             currentDb = measurement.db
             currentHz = measurement.hz
-            if (measurement.db > peakDb) {
-                peakDb = measurement.db
-            }
             lastAudioLocation = location
             lastAudioTimeMillis = now
 
@@ -276,10 +278,6 @@ fun WearApp(
                 linkStatus = "Link removed"
                 linkRetryNonce++
                 return@LaunchedEffect
-            }
-
-            if (result.startsWith("Response")) {
-                sendCount++
             }
 
             delay(LOCATION_POLL_INTERVAL_MS)
@@ -320,7 +318,7 @@ fun WearApp(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(MaterialTheme.colors.background),
+                .background(SoundRealBackground),
             contentAlignment = Alignment.Center
         ) {
             TimeText()
@@ -335,53 +333,14 @@ fun WearApp(
             } else {
                 MeasurementContent(
                     currentDb = currentDb,
-                    peakDb = peakDb,
                     currentHz = currentHz,
                     sendStatus = sendStatus,
                     locationStatus = locationStatus,
                     audioStatus = audioStatus,
-                    sendCount = sendCount,
                     hasAudioPermission = hasAudioPermission,
                     hasLocationPermission = hasLocationPermission,
                     onRequestPermission = onRequestPermission,
-                    onRequestLocationPermission = onRequestLocationPermission,
-                    onSend = {
-                        scope.launch {
-                            val currentLatitude = latitude
-                            val currentLongitude = longitude
-                            val currentDeviceToken = deviceToken
-
-                            if (currentLatitude == null || currentLongitude == null) {
-                                sendStatus = "Waiting for GPS"
-                                return@launch
-                            }
-                            if (currentDeviceToken == null) {
-                                sendStatus = "Link required"
-                                return@launch
-                            }
-
-                            sendStatus = "Sending"
-                            sendStatus = sendMeasurement(
-                                currentDb,
-                                currentHz,
-                                currentLatitude,
-                                currentLongitude,
-                                currentDeviceToken
-                            )
-                            if (sendStatus == "Response: 401") {
-                                context.getSharedPreferences(DEVICE_PREFS_NAME, Context.MODE_PRIVATE)
-                                    .edit()
-                                    .remove(DEVICE_TOKEN_KEY)
-                                    .remove(DEVICE_ID_KEY)
-                                    .apply()
-                                deviceToken = null
-                                deviceId = null
-                                pairingCode = null
-                                linkStatus = "Link removed"
-                                linkRetryNonce++
-                            }
-                        }
-                    }
+                    onRequestLocationPermission = onRequestLocationPermission
                 )
             }
         }
@@ -397,77 +356,80 @@ fun SetupContent(
 ) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
         modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 14.dp)
-            .padding(top = 22.dp, bottom = 8.dp)
-            .verticalScroll(rememberScrollState())
+            .fillMaxSize()
+            .padding(horizontal = 20.dp, vertical = 24.dp)
     ) {
         Text(
             text = "SoundReal",
-            fontSize = 17.sp,
+            color = SoundRealText,
+            fontSize = 14.sp,
             fontWeight = FontWeight.Bold,
             textAlign = TextAlign.Center
         )
 
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(6.dp))
 
-        if (pairingCode == null) {
-            Text(
-                text = "Connect your watch",
-                fontSize = 13.sp,
-                fontWeight = FontWeight.SemiBold,
-                textAlign = TextAlign.Center
-            )
-            Spacer(modifier = Modifier.height(5.dp))
-            Text(
-                text = "Get a code, then enter it in the mobile app.",
-                fontSize = 10.sp,
-                textAlign = TextAlign.Center
-            )
-            Spacer(modifier = Modifier.height(10.dp))
-            Chip(
-                onClick = onRequestPairingCode,
-                enabled = !isRequestingCode,
-                label = {
-                    Text(
-                        text = if (isRequestingCode) "Getting..." else "Get Code",
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(38.dp)
-            )
-        } else {
-            Text(
-                text = pairingCode,
-                fontSize = 25.sp,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center
-            )
-            Spacer(modifier = Modifier.height(5.dp))
-            Text(
-                text = "Enter this code in the mobile app.",
-                fontSize = 10.sp,
-                textAlign = TextAlign.Center
-            )
-            Spacer(modifier = Modifier.height(7.dp))
-            Text(
-                text = if (linkStatus == "Waiting for link") "Waiting..." else linkStatus,
-                fontSize = 10.sp,
-                textAlign = TextAlign.Center
-            )
+        Panel {
+            if (pairingCode == null) {
+                Text(
+                    text = "Watch link",
+                    color = SoundRealPrimary,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Enter the code on mobile.",
+                    color = SoundRealMuted,
+                    fontSize = 9.sp,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Chip(
+                    onClick = onRequestPairingCode,
+                    enabled = !isRequestingCode,
+                    colors = ChipDefaults.primaryChipColors(
+                        backgroundColor = SoundRealPrimary,
+                        contentColor = SoundRealBackground
+                    ),
+                    label = {
+                        Text(
+                            text = if (isRequestingCode) "Getting..." else "Get code",
+                            fontWeight = FontWeight.Bold,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(34.dp)
+                )
+            } else {
+                Text(
+                    text = pairingCode,
+                    color = SoundRealGold,
+                    fontSize = 23.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Enter on mobile.",
+                    color = SoundRealMuted,
+                    fontSize = 9.sp,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                StatusPill(if (linkStatus == "Waiting for link") "Waiting..." else linkStatus)
+            }
         }
 
         if (pairingCode == null && linkStatus != "Not linked") {
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = linkStatus,
-                fontSize = 10.sp,
-                textAlign = TextAlign.Center
-            )
+            Spacer(modifier = Modifier.height(6.dp))
+            StatusPill(linkStatus)
         }
     }
 }
@@ -475,84 +437,157 @@ fun SetupContent(
 @Composable
 fun MeasurementContent(
     currentDb: Double,
-    peakDb: Double,
     currentHz: Double,
     sendStatus: String,
     locationStatus: String,
     audioStatus: String,
-    sendCount: Int,
     hasAudioPermission: Boolean,
     hasLocationPermission: Boolean,
     onRequestPermission: () -> Unit,
-    onRequestLocationPermission: () -> Unit,
-    onSend: () -> Unit
+    onRequestLocationPermission: () -> Unit
 ) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 18.dp, vertical = 10.dp)
+    ) {
+        Text(
+            text = "SoundReal",
+            color = SoundRealText,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center
+        )
+
+        Spacer(modifier = Modifier.height(3.dp))
+
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .size(74.dp)
+                .clip(CircleShape)
+                .background(SoundRealPanel)
+                .border(2.dp, SoundRealStroke, CircleShape)
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = "%.1f".format(currentDb),
+                    color = SoundRealText,
+                    fontSize = 21.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center
+                )
+                Text(
+                    text = "dB",
+                    color = SoundRealPrimary,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    textAlign = TextAlign.Center
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        MetricTile("Frequency", "%.1f Hz".format(currentHz), Modifier.fillMaxWidth())
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        StatusPill(compactStatus(locationStatus, audioStatus, sendStatus))
+        if (!hasAudioPermission || !hasLocationPermission) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                if (!hasAudioPermission) {
+                    PermissionChip("Mic", onRequestPermission, Modifier.weight(1f))
+                }
+                if (!hasLocationPermission) {
+                    PermissionChip("GPS", onRequestLocationPermission, Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun Panel(content: @Composable ColumnScope.() -> Unit) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp)
-            .padding(top = 22.dp, bottom = 8.dp)
-            .verticalScroll(rememberScrollState())
+            .clip(RoundedCornerShape(14.dp))
+            .background(SoundRealPanel)
+            .border(1.dp, SoundRealStroke, RoundedCornerShape(14.dp))
+            .padding(horizontal = 10.dp, vertical = 10.dp),
+        content = content
+    )
+}
+
+@Composable
+fun MetricTile(label: String, value: String, modifier: Modifier = Modifier) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(SoundRealPanel)
+            .border(1.dp, SoundRealStroke, RoundedCornerShape(10.dp))
+            .padding(vertical = 4.dp)
     ) {
         Text(
-            text = "SoundReal",
-            fontSize = 15.sp,
-            fontWeight = FontWeight.Bold,
-            textAlign = TextAlign.Center
-        )
-
-        Spacer(modifier = Modifier.height(6.dp))
-
-        Text(
-            text = "%.1f dB".format(currentDb),
-            fontSize = 30.sp,
-            fontWeight = FontWeight.Bold,
-            textAlign = TextAlign.Center
-        )
-
-        Text(
-            text = "%.1f Hz".format(currentHz),
-            fontSize = 13.sp,
-            textAlign = TextAlign.Center
-        )
-
-        Spacer(modifier = Modifier.height(5.dp))
-
-        Text(
-            text = "Peak %.1f dB".format(peakDb),
-            fontSize = 10.sp,
+            text = label,
+            color = SoundRealMuted,
+            fontSize = 8.sp,
             textAlign = TextAlign.Center
         )
         Text(
-            text = compactStatus(locationStatus, audioStatus, sendStatus),
-            fontSize = 10.sp,
+            text = value,
+            color = SoundRealText,
+            fontSize = 9.sp,
+            fontWeight = FontWeight.SemiBold,
             textAlign = TextAlign.Center
         )
-        Text(
-            text = "Sent $sendCount",
-            fontSize = 10.sp,
-            textAlign = TextAlign.Center
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        if (!hasAudioPermission) {
-            Button(onClick = onRequestPermission) {
-                Text("Mic")
-            }
-        }
-        if (!hasLocationPermission) {
-            Button(onClick = onRequestLocationPermission) {
-                Text("GPS")
-            }
-        }
-        if (hasAudioPermission && hasLocationPermission) {
-            Button(onClick = onSend) {
-                Text("Send")
-            }
-        }
     }
+}
+
+@Composable
+fun StatusPill(text: String) {
+    Text(
+        text = text,
+        color = SoundRealPrimary,
+        fontSize = 9.sp,
+        fontWeight = FontWeight.SemiBold,
+        textAlign = TextAlign.Center,
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(Color(0x1A64C8FF))
+            .border(1.dp, SoundRealStroke, RoundedCornerShape(999.dp))
+            .padding(horizontal = 8.dp, vertical = 3.dp)
+    )
+}
+
+@Composable
+fun PermissionChip(label: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Chip(
+        onClick = onClick,
+        colors = ChipDefaults.primaryChipColors(
+            backgroundColor = SoundRealPrimary,
+            contentColor = SoundRealBackground
+        ),
+        label = {
+            Text(
+                text = label,
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
+            )
+        },
+        modifier = modifier.height(30.dp)
+    )
 }
 
 fun compactStatus(
@@ -563,10 +598,12 @@ fun compactStatus(
     return when {
         locationStatus.contains("No GPS", ignoreCase = true) -> "GPS waiting"
         audioStatus.contains("sampling", ignoreCase = true) -> "Listening"
-        sendStatus.contains("Sending", ignoreCase = true) -> "Sending"
-        sendStatus.startsWith("Response: 2") -> "Synced"
+        sendStatus.contains("Sending", ignoreCase = true) -> "Syncing"
         sendStatus.startsWith("Error") -> "Network error"
-        else -> locationStatus
+        locationStatus.contains("permission", ignoreCase = true) -> "GPS permission"
+        audioStatus.contains("permission", ignoreCase = true) -> "Mic permission"
+        sendStatus.contains("paused", ignoreCase = true) -> "Waiting"
+        else -> "Ready"
     }
 }
 
