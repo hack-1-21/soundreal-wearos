@@ -23,6 +23,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -30,6 +32,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.wear.compose.material.*
+import com.example.hack_1_21_smartwatch.R
 import com.example.hack_1_21_smartwatch.BuildConfig
 import com.example.hack_1_21_smartwatch.presentation.theme.Hack121smartwatchTheme
 import com.google.android.gms.location.FusedLocationProviderClient
@@ -61,6 +64,12 @@ private val SoundRealGold = Color(0xFFFFD060)
 private val SoundRealText = Color(0xFFE8F4FF)
 private val SoundRealMuted = Color(0x99E8F4FF)
 private val SoundRealStroke = Color(0x4064C8FF)
+private val KiwiMaru = FontFamily(
+    Font(R.font.kiwi_maru_regular, FontWeight.Normal),
+    Font(R.font.kiwi_maru_medium, FontWeight.Medium),
+    Font(R.font.kiwi_maru_medium, FontWeight.SemiBold),
+    Font(R.font.kiwi_maru_medium, FontWeight.Bold)
+)
 
 class MainActivity : ComponentActivity() {
 
@@ -364,6 +373,7 @@ fun SetupContent(
         Text(
             text = "SoundReal",
             color = SoundRealText,
+            fontFamily = KiwiMaru,
             fontSize = 14.sp,
             fontWeight = FontWeight.Bold,
             textAlign = TextAlign.Center
@@ -376,6 +386,7 @@ fun SetupContent(
                 Text(
                     text = "Watch link",
                     color = SoundRealPrimary,
+                    fontFamily = KiwiMaru,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
                     textAlign = TextAlign.Center
@@ -384,6 +395,7 @@ fun SetupContent(
                 Text(
                     text = "Enter the code on mobile.",
                     color = SoundRealMuted,
+                    fontFamily = KiwiMaru,
                     fontSize = 9.sp,
                     textAlign = TextAlign.Center
                 )
@@ -398,6 +410,7 @@ fun SetupContent(
                     label = {
                         Text(
                             text = if (isRequestingCode) "Getting..." else "Get code",
+                            fontFamily = KiwiMaru,
                             fontWeight = FontWeight.Bold,
                             textAlign = TextAlign.Center,
                             modifier = Modifier.fillMaxWidth()
@@ -411,6 +424,7 @@ fun SetupContent(
                 Text(
                     text = pairingCode,
                     color = SoundRealGold,
+                    fontFamily = KiwiMaru,
                     fontSize = 23.sp,
                     fontWeight = FontWeight.Bold,
                     textAlign = TextAlign.Center
@@ -419,6 +433,7 @@ fun SetupContent(
                 Text(
                     text = "Enter on mobile.",
                     color = SoundRealMuted,
+                    fontFamily = KiwiMaru,
                     fontSize = 9.sp,
                     textAlign = TextAlign.Center
                 )
@@ -456,6 +471,7 @@ fun MeasurementContent(
         Text(
             text = "SoundReal",
             color = SoundRealText,
+            fontFamily = KiwiMaru,
             fontSize = 12.sp,
             fontWeight = FontWeight.Bold,
             textAlign = TextAlign.Center
@@ -475,6 +491,7 @@ fun MeasurementContent(
                 Text(
                     text = "%.1f".format(currentDb),
                     color = SoundRealText,
+                    fontFamily = KiwiMaru,
                     fontSize = 21.sp,
                     fontWeight = FontWeight.Bold,
                     textAlign = TextAlign.Center
@@ -482,6 +499,7 @@ fun MeasurementContent(
                 Text(
                     text = "dB",
                     color = SoundRealPrimary,
+                    fontFamily = KiwiMaru,
                     fontSize = 10.sp,
                     fontWeight = FontWeight.SemiBold,
                     textAlign = TextAlign.Center
@@ -540,12 +558,14 @@ fun MetricTile(label: String, value: String, modifier: Modifier = Modifier) {
         Text(
             text = label,
             color = SoundRealMuted,
+            fontFamily = KiwiMaru,
             fontSize = 8.sp,
             textAlign = TextAlign.Center
         )
         Text(
             text = value,
             color = SoundRealText,
+            fontFamily = KiwiMaru,
             fontSize = 9.sp,
             fontWeight = FontWeight.SemiBold,
             textAlign = TextAlign.Center
@@ -558,6 +578,7 @@ fun StatusPill(text: String) {
     Text(
         text = text,
         color = SoundRealPrimary,
+        fontFamily = KiwiMaru,
         fontSize = 9.sp,
         fontWeight = FontWeight.SemiBold,
         textAlign = TextAlign.Center,
@@ -580,6 +601,7 @@ fun PermissionChip(label: String, onClick: () -> Unit, modifier: Modifier = Modi
         label = {
             Text(
                 text = label,
+                fontFamily = KiwiMaru,
                 fontSize = 9.sp,
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center,
