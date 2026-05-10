@@ -373,7 +373,7 @@ fun SetupContent(
             .padding(horizontal = 20.dp, vertical = 24.dp)
     ) {
         Text(
-            text = "SoundReal",
+            text = "Otoniwa",
             color = SoundRealText,
             fontFamily = KiwiMaru,
             fontSize = 14.sp,
@@ -471,7 +471,7 @@ fun MeasurementContent(
             .padding(horizontal = 18.dp, vertical = 10.dp)
     ) {
         Text(
-            text = "SoundReal",
+            text = "Otoniwa",
             color = SoundRealText,
             fontFamily = KiwiMaru,
             fontSize = 12.sp,
